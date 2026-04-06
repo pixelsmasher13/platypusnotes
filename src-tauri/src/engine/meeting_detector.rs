@@ -29,28 +29,47 @@ fn is_zoom_in_meeting(system: &System) -> bool {
 }
 
 /// Check if Microsoft Teams is in an active meeting.
-/// Teams spawns audio utility sub-processes during calls. We check for the
-/// audio.mojom.AudioService utility with elevated CPU (> 1% = actively
-/// processing audio = in a call).
+/// Teams keeps an audio.mojom.AudioService utility sub-process running at all
+/// times, but its CPU usage is ~0% when idle and rises to 0.3-0.6%+ during a
+/// call. We use a low threshold (0.2%) to distinguish meeting vs idle.
 fn is_teams_in_meeting(system: &System) -> bool {
+    let mut found_audio_service = false;
+    let mut max_cpu: f32 = 0.0;
+
     for (_pid, process) in system.processes() {
         let cmd_joined = process.cmd().join(" ");
         if cmd_joined.contains("Microsoft Teams") && cmd_joined.contains("audio.mojom.AudioService") {
             let cpu = process.cpu_usage();
-            if cpu > 1.0 {
-                debug!("Teams audio service CPU: {:.1}%", cpu);
+            found_audio_service = true;
+            if cpu > max_cpu {
+                max_cpu = cpu;
+            }
+            if cpu > 0.2 {
+                debug!("Teams audio service CPU: {:.2}% → in meeting", cpu);
                 return true;
             }
         }
     }
+
+    if found_audio_service {
+        debug!("Teams audio service idle (CPU {:.2}%)", max_cpu);
+    }
+
     false
 }
+
+/// Number of consecutive "not detected" polls before we consider a meeting ended.
+/// Prevents flapping when audio CPU briefly dips below threshold.
+const LEAVE_GRACE_POLLS: u8 = 3;
 
 struct MeetingDetector {
     system: System,
     previously_detected: HashSet<String>,
     /// Per-app cooldown tracking: app_name → last notification time
     cooldowns: HashMap<String, Instant>,
+    /// Counts consecutive polls where a previously-detected app was NOT seen.
+    /// Once this reaches LEAVE_GRACE_POLLS, we actually remove it.
+    absent_counts: HashMap<String, u8>,
 }
 
 impl MeetingDetector {
@@ -59,6 +78,7 @@ impl MeetingDetector {
             system: System::new_all(),
             previously_detected: HashSet::new(),
             cooldowns: HashMap::new(),
+            absent_counts: HashMap::new(),
         }
     }
 
@@ -67,13 +87,37 @@ impl MeetingDetector {
     fn poll(&mut self) -> Vec<String> {
         self.system.refresh_processes();
 
-        let mut current_meeting_apps: HashSet<String> = HashSet::new();
+        let mut current_raw: HashSet<String> = HashSet::new();
 
         if is_zoom_in_meeting(&self.system) {
-            current_meeting_apps.insert("Zoom".to_string());
+            current_raw.insert("Zoom".to_string());
         }
         if is_teams_in_meeting(&self.system) {
-            current_meeting_apps.insert("Microsoft Teams".to_string());
+            current_raw.insert("Microsoft Teams".to_string());
+        }
+
+        // Apply grace period: apps that were previously detected but aren't
+        // in current_raw need to be absent for LEAVE_GRACE_POLLS consecutive
+        // polls before we actually remove them.
+        let mut current_meeting_apps = current_raw.clone();
+
+        for app in &self.previously_detected {
+            if !current_raw.contains(app) {
+                let count = self.absent_counts.entry(app.clone()).or_insert(0);
+                *count += 1;
+                if *count < LEAVE_GRACE_POLLS {
+                    debug!("{} not detected this poll ({}/{}), keeping in detected set",
+                        app, count, LEAVE_GRACE_POLLS);
+                    current_meeting_apps.insert(app.clone());
+                } else {
+                    info!("{} absent for {} polls, marking as left meeting", app, count);
+                }
+            }
+        }
+
+        // Clear absent counts for apps that ARE detected this poll
+        for app in &current_raw {
+            self.absent_counts.remove(app);
         }
 
         // Find apps that just entered a meeting (weren't detected in previous poll)
