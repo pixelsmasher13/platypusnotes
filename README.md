@@ -11,6 +11,10 @@ Lightning-fast note taker, meeting transcriber, and knowledge manager. The open-
 - **Meeting detection** — Automatically detects Zoom and Teams meetings and prompts you to record
 - **100% private** — Everything stored locally on your device
 
+
+https://github.com/user-attachments/assets/e034862a-0def-4b75-a133-d850d191d82a
+
+
 ## Voice Transcription
 
 Two modes, controlled via a toggle in Settings (or during onboarding):
