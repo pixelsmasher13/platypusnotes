@@ -23,3 +23,8 @@ tsconfig.tsbuildinfo
 *.njsproj
 *.sln
 *.sw?
+.vercel
+
+# Local build credentials (Apple notarization keys, etc.)
+.env.build
+.env.build.local

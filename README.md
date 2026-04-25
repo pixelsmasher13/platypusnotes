@@ -1,70 +1,113 @@
 # Platypus Notes
 
-Lightning-fast note taker, meeting transcriber, and knowledge manager. The open-source, private knowledge organizer with built-in AI.
+A private, desktop-native AI notebook. Combines local meeting transcription, note editing, and RAG-powered chat across your knowledge base — all running on your machine. The only network calls are to whichever LLM you choose to connect, and only when you ask a question.
 
-- **Voice notes** — Record and automatically transcribe your meetings and voice notes
-- **Note editor** — Rich document editor with formatting, auto-save, and AI-powered cleanup
-- **Project organization** — Group notes and docs by project for focused retrieval
-- **Paste & go** — Copy-paste any document and it instantly becomes part of your knowledge base
-- **Local embeddings** — Fast vector search across all your documents, no cloud needed
-- **Chat with your knowledge** — Ask questions using Claude, OpenAI, Gemini, or local models
-- **Meeting detection** — Automatically detects Zoom and Teams meetings and prompts you to record
-- **100% private** — Everything stored locally on your device
-
+[**Download for macOS**](https://the-platypus-app.s3.amazonaws.com/PlatypusNotes-latest.dmg) · [platypusnotes.com](https://platypusnotes.com) · MIT license
 
 <video src="https://github.com/user-attachments/assets/e034862a-0def-4b75-a133-d850d191d82a" autoplay loop muted playsinline></video>
 
+## What it does
 
-## Voice Transcription
+- **Capture meetings** — auto-detects Zoom and Teams calls; transcribes locally via Whisper or via OpenAI's API
+- **Organize notes and documents** — rich editor with PDF/DOCX/TXT import, project grouping, and AI-assisted polish
+- **Chat with everything you've written** — per-project HNSW vector search, with Claude, OpenAI, Gemini, or any local Ollama model
 
-Two modes, controlled via a toggle in Settings (or during onboarding):
+Data stays on disk in SQLite. In local transcription mode, audio never leaves your machine.
 
-| | OpenAI API (default) | Local Whisper |
-|---|---|---|
-| **How it works** | Records WAV, uploads to OpenAI Whisper API | On-device transcription via whisper.cpp |
-| **Model** | OpenAI Whisper | User-selectable (see below) |
-| **Requires** | OpenAI API key | Nothing (model auto-downloaded on first use) |
-| **Real-time** | No (transcribes after recording) | Yes (live transcript streams during recording) |
-| **Offline** | No | Yes |
-| **Hardware accel** | N/A | Metal (macOS), CPU fallback |
+## How it compares
 
-**Local models** (selectable in Settings): Distil Large v3.5 (~1.5GB, default), Large v3 Turbo (~1.6GB), Large v3 (~3.1GB, best quality).
+|                              | Platypus    | Granola | NotebookLM | Otter.ai |
+| ---------------------------- | ----------- | ------- | ---------- | -------- |
+| Stores data on your machine  | ✅          | ❌      | ❌         | ❌       |
+| Meeting transcription        | ✅          | ✅      | ❌         | ✅       |
+| RAG over your notes/docs     | ✅          | partial | ✅         | ❌       |
+| Bring your own LLM           | ✅          | ❌      | ❌         | ❌       |
+| Open source                  | ✅          | ❌      | ❌         | ❌       |
+| Free                         | ✅          | partial | partial    | ❌       |
+| Native desktop               | ✅          | ✅      | ❌         | ❌       |
 
-## Requirements
+## Architecture
 
-- [Node 18+](https://nodejs.org/en/download/package-manager) (recommended via [nvm](https://github.com/nvm-sh/nvm))
+A few notes on the interesting parts.
+
+- **Audio pipeline**: CPAL capture → energy-based VAD on raw samples → nnnoiseless denoising at 48kHz → rubato resample to 16kHz → whisper.cpp via [whisper-rs](https://github.com/tazz4843/whisper-rs) with Metal on macOS.
+- **Why VAD before denoise**: RNNoise crushes signal amplitude ~100x, so the energy gate has to run on raw audio or every chunk looks silent.
+- **Real-time chunking**: 3-second minimum chunks streamed during recording; the trailing chunk is drained at stop and transcribed regardless of length.
+- **Vector search**: per-project HNSW indices ([hnswlib-rs](https://github.com/jean-pierreBoth/hnswlib-rs)); documents chunked and embedded on save when vectorization is enabled.
+- **Meeting detection**: detects Zoom by presence of the `CptHost` process and Teams by CPU usage on its `audio.mojom.AudioService` sub-process — no Zoom/Teams API access required.
+- **Process model**: Tauri v1 with Rust backend + React/TS frontend. `lazy_static` singletons for the Whisper engine and vector store; `tokio::task::spawn_blocking` for CPU-heavy work in async paths.
+
+## Voice transcription
+
+Two modes, switchable in Settings:
+
+|                  | OpenAI API (default)                            | Local Whisper                                    |
+| ---------------- | ----------------------------------------------- | ------------------------------------------------ |
+| How it works     | Records WAV, uploads to OpenAI Whisper API     | On-device via whisper.cpp                        |
+| Model            | OpenAI Whisper                                  | Distil Large v3.5 / Large v3 Turbo / Large v3    |
+| Requires         | OpenAI API key                                  | Nothing (model auto-downloads on first use)      |
+| Real-time        | No (transcribes after recording)                | Yes (live transcript streams during recording)   |
+| Offline          | No                                              | Yes                                              |
+| Hardware accel   | N/A                                             | Metal on macOS, CPU fallback elsewhere           |
+
+Local models are listed in Settings. Default is Distil Large v3.5 (~1.5GB); Large v3 (~3.1GB) is the highest quality.
+
+## Tech stack
+
+| Layer            | Technology                                                                        |
+| ---------------- | --------------------------------------------------------------------------------- |
+| Desktop shell    | Tauri v1 (1.5.2)                                                                  |
+| Backend          | Rust                                                                              |
+| Frontend         | React + TypeScript + Vite                                                         |
+| UI               | Chakra UI + styled-components                                                     |
+| Editor           | TipTap                                                                            |
+| AI providers     | Claude, OpenAI, Gemini, Ollama                                                    |
+| Transcription    | whisper-rs v0.16 (local) / OpenAI Whisper API (cloud)                             |
+| Audio            | CPAL (recording), nnnoiseless (denoising), rubato (resampling)                    |
+| Database         | SQLite (rusqlite)                                                                 |
+| Vector search    | HNSW (hnswlib-rs)                                                                 |
+
+## Build from source
+
+### Requirements
+
+- Node 18+ (recommended via [nvm](https://github.com/nvm-sh/nvm))
 - [Rust](https://www.rust-lang.org/tools/install)
-- **cmake** (required by whisper-rs-sys to compile whisper.cpp) — `brew install cmake` on macOS
+- **cmake** — required by `whisper-rs-sys` to compile whisper.cpp
+  - macOS: `brew install cmake`
+  - Windows: `winget install Kitware.CMake`
+- **LLVM / libclang** (Windows only — required by `bindgen` when building `whisper-rs-sys`; macOS ships this via Xcode Command Line Tools)
+  - `winget install LLVM.LLVM`
+  - Then set `LIBCLANG_PATH` so `bindgen` can find `libclang.dll`:
+    ```
+    setx LIBCLANG_PATH "C:\Program Files\LLVM\bin"
+    ```
+    Open a new terminal afterward so the env var is picked up.
 
-## How to run
+### Run in dev
 
-```
+```bash
 npm install
 npm run tauri dev
 ```
 
-If you have dependency issues, try deleting `package-lock.json` and running `npm install` again.
+If you hit dependency issues, delete `package-lock.json` and re-run `npm install`.
 
-Add your API keys in the app Settings before use.
+Add your LLM API keys in Settings before use.
 
-## How to build
+### Build a release
 
-```
+```bash
 npm install
 npm run tauri build
 ```
 
-## Tech Stack
+For a signed + notarized macOS build that uploads to your S3 bucket, see [`scripts/build-mac.sh`](scripts/build-mac.sh) — requires Apple Developer credentials in `.env.build`.
 
-| Layer | Technology |
-|-------|-----------|
-| Desktop shell | Tauri v1 (1.5.2) |
-| Backend | Rust |
-| Frontend | React + TypeScript + Vite |
-| UI | Chakra UI + styled-components |
-| Editor | TipTap |
-| AI providers | Claude, OpenAI, Gemini, Ollama |
-| Transcription | whisper-rs v0.16 (local) / OpenAI Whisper API (cloud) |
-| Audio | CPAL (recording), nnnoiseless (denoising), rubato (resampling) |
-| Database | SQLite (rusqlite) |
-| Vector search | HNSW (hnswlib-rs) |
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+MIT.
