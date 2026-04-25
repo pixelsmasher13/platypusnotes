@@ -33,7 +33,7 @@ export const DEFAULT_SETTINGS: Settings = {
   model_claude: "",
   model_openai: "",
   model_gemini: "",
-  use_local_transcription: false,
+  use_local_transcription: true,
   whisper_model: "large-v3",
 };
 
@@ -104,7 +104,7 @@ export const SettingsProvider: FC<PropsWithChildren> = ({ children }) => {
       model_claude: getSettingOrEmpty(response, "model_claude") || "",
       model_openai: getSettingOrEmpty(response, "model_openai") || "",
       model_gemini: getSettingOrEmpty(response, "model_gemini") || "",
-      use_local_transcription: getSettingOrEmpty(response, "use_local_transcription") === "true",
+      use_local_transcription: getSettingOrEmpty(response, "use_local_transcription") !== "false",
       whisper_model: getSettingOrEmpty(response, "whisper_model") || "large-v3",
     };
   };

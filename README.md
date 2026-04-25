@@ -1,6 +1,6 @@
 # Platypus Notes
 
-A private, desktop-native AI notebook. Combines local meeting transcription, note editing, and RAG-powered chat across your knowledge base — all running on your machine. The only network calls are to whichever LLM you choose to connect, and only when you ask a question.
+An open-source desktop app for taking notes, transcribing meetings, and chatting with your documents. Runs entirely on your machine — the only network calls are to whichever LLM you choose to connect, and only when you ask a question.
 
 [**Download for macOS**](https://the-platypus-app.s3.amazonaws.com/PlatypusNotes-latest.dmg) · [platypusnotes.com](https://platypusnotes.com) · MIT license
 
@@ -39,18 +39,21 @@ A few notes on the interesting parts.
 
 ## Voice transcription
 
-Two modes, switchable in Settings:
+Two modes, switchable in Settings.
 
-|                  | OpenAI API (default)                            | Local Whisper                                    |
-| ---------------- | ----------------------------------------------- | ------------------------------------------------ |
-| How it works     | Records WAV, uploads to OpenAI Whisper API     | On-device via whisper.cpp                        |
-| Model            | OpenAI Whisper                                  | Distil Large v3.5 / Large v3 Turbo / Large v3    |
-| Requires         | OpenAI API key                                  | Nothing (model auto-downloads on first use)      |
-| Real-time        | No (transcribes after recording)                | Yes (live transcript streams during recording)   |
-| Offline          | No                                              | Yes                                              |
-| Hardware accel   | N/A                                             | Metal on macOS, CPU fallback elsewhere           |
+**Local Whisper (default)** — on-device transcription via whisper.cpp.
 
-Local models are listed in Settings. Default is Distil Large v3.5 (~1.5GB); Large v3 (~3.1GB) is the highest quality.
+- Real-time: live transcript streams during recording
+- Works offline, no API key required
+- Hardware-accelerated via Metal on macOS, CPU fallback elsewhere
+- Models (selectable in Settings): Large v3 (~3.1GB, default, best quality), Large v3 Turbo (~1.6GB), Distil Large v3.5 (~1.5GB, fastest)
+- Model auto-downloads on first use
+
+**OpenAI API** — records WAV, uploads to OpenAI's Whisper endpoint.
+
+- Requires an OpenAI API key
+- Transcribes after recording finishes (not real-time)
+- Requires internet
 
 ## Tech stack
 
