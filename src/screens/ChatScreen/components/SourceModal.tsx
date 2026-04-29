@@ -70,18 +70,22 @@ const PassageContent = styled.div`
 interface SourceModalProps {
   isOpen: boolean;
   source: ChunkSource | null;
+  siblings?: ChunkSource[];
   fullText?: string;
   isLoading?: boolean;
   onClose: () => void;
+  onSelectSibling?: (chunk: ChunkSource) => void;
   onOpenDocument?: (documentId: number) => void;
 }
 
 export const SourceModal: FC<SourceModalProps> = ({
   isOpen,
   source,
+  siblings,
   fullText,
   isLoading,
   onClose,
+  onSelectSibling,
   onOpenDocument,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
@@ -140,6 +144,31 @@ export const SourceModal: FC<SourceModalProps> = ({
         <ModalCloseButton />
         <ModalBody pb={6}>
           <Flex direction="column" gap={3}>
+            {siblings && siblings.length > 1 && (
+              <Flex gap={2} flexWrap="wrap">
+                <Text fontSize="xs" color="gray.500" alignSelf="center" mr={1}>
+                  Passages:
+                </Text>
+                {siblings.map((sib) => {
+                  const isActive = sib.chunk_id === source.chunk_id;
+                  return (
+                    <Button
+                      key={sib.chunk_id}
+                      size="xs"
+                      variant={isActive ? "solid" : "outline"}
+                      colorScheme={isActive ? "blue" : "gray"}
+                      borderRadius="full"
+                      onClick={() => onSelectSibling?.(sib)}
+                      isDisabled={isActive}
+                      _disabled={{ opacity: 1, cursor: "default" }}
+                    >
+                      {sib.chunk_index + 1}
+                    </Button>
+                  );
+                })}
+              </Flex>
+            )}
+
             <InputGroup size="sm">
               <InputLeftElement pointerEvents="none">
                 <Search size={14} color="gray" />

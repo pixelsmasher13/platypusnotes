@@ -49,7 +49,7 @@ const SourceChip = styled.button`
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s ease;
-  max-width: 200px;
+  max-width: 240px;
 
   &:hover {
     background: var(--button-secondary-hover-bg, rgba(255, 255, 255, 0.1));
@@ -78,45 +78,71 @@ const SourceName = styled.span`
   white-space: nowrap;
 `;
 
+const PassageBadge = styled.span`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--accent-color, #6366f1);
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+`;
+
+export type DocumentGroup = {
+  document_id: number;
+  document_name: string;
+  chunks: ChunkSource[];
+};
+
+// Group sources by document, preserving the order of first appearance.
+// Within each group, chunks are sorted by chunk_index so the user can read them in document order.
+function groupByDocument(sources: ChunkSource[]): DocumentGroup[] {
+  const map = new Map<number, DocumentGroup>();
+  for (const source of sources) {
+    let group = map.get(source.document_id);
+    if (!group) {
+      group = {
+        document_id: source.document_id,
+        document_name: source.document_name,
+        chunks: [],
+      };
+      map.set(source.document_id, group);
+    }
+    group.chunks.push(source);
+  }
+  for (const group of map.values()) {
+    group.chunks.sort((a, b) => a.chunk_index - b.chunk_index);
+  }
+  return Array.from(map.values());
+}
+
 type SourcesCitationProps = {
   sources: ChunkSource[];
   onOpenDocument?: (documentId: number) => void;
 };
 
-// Deduplicate sources by document_id, keeping the first occurrence
-function deduplicateSources(sources: ChunkSource[]): ChunkSource[] {
-  const seen = new Set<number>();
-  return sources.filter(source => {
-    if (seen.has(source.document_id)) {
-      return false;
-    }
-    seen.add(source.document_id);
-    return true;
-  });
-}
-
 export const SourcesCitation: FC<SourcesCitationProps> = ({ sources, onOpenDocument }) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [selectedSource, setSelectedSource] = useState<ChunkSource | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<DocumentGroup | null>(null);
+  const [selectedChunk, setSelectedChunk] = useState<ChunkSource | null>(null);
   const [fullChunkText, setFullChunkText] = useState<string | undefined>();
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  const uniqueSources = deduplicateSources(sources);
+  const groups = groupByDocument(sources);
 
-  if (uniqueSources.length === 0) {
+  if (groups.length === 0) {
     return null;
   }
 
-  const handleSourceClick = async (source: ChunkSource) => {
-    setSelectedSource(source);
+  const fetchChunkText = async (chunkId: number) => {
     setFullChunkText(undefined);
-    setIsModalOpen(true);
-
-    // Fetch the full passage text
     try {
-      console.log("[SourcesCitation] Fetching passage text for chunk_id:", source.chunk_id);
-      const text = await invoke<string | null>("get_chunk_text", { chunkId: source.chunk_id });
-      console.log("[SourcesCitation] Received text:", text ? `${text.length} chars` : "null");
+      const text = await invoke<string | null>("get_chunk_text", { chunkId });
       if (text) {
         setFullChunkText(text);
       }
@@ -125,9 +151,23 @@ export const SourcesCitation: FC<SourcesCitationProps> = ({ sources, onOpenDocum
     }
   };
 
+  const handleGroupClick = (group: DocumentGroup) => {
+    setSelectedGroup(group);
+    const firstChunk = group.chunks[0];
+    setSelectedChunk(firstChunk);
+    setIsModalOpen(true);
+    fetchChunkText(firstChunk.chunk_id);
+  };
+
+  const handleSelectSibling = (chunk: ChunkSource) => {
+    setSelectedChunk(chunk);
+    fetchChunkText(chunk.chunk_id);
+  };
+
   const handleCloseModal = () => {
     setIsModalOpen(false);
-    setSelectedSource(null);
+    setSelectedGroup(null);
+    setSelectedChunk(null);
     setFullChunkText(undefined);
   };
 
@@ -135,22 +175,29 @@ export const SourcesCitation: FC<SourcesCitationProps> = ({ sources, onOpenDocum
     <SourcesContainer>
       <SourcesHeader onClick={() => setIsExpanded(!isExpanded)}>
         <FileText size={14} />
-        <span>{uniqueSources.length} source{uniqueSources.length !== 1 ? 's' : ''}</span>
+        <span>{groups.length} source{groups.length !== 1 ? 's' : ''}</span>
         {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
       </SourcesHeader>
 
       <Collapse in={isExpanded} animateOpacity>
         <SourcesList>
-          {uniqueSources.map((source, index) => (
+          {groups.map((group, index) => (
             <Tooltip
-              key={source.chunk_id}
-              label={source.document_name}
+              key={group.document_id}
+              label={
+                group.chunks.length > 1
+                  ? `${group.document_name} — ${group.chunks.length} passages`
+                  : group.document_name
+              }
               placement="top"
               hasArrow
             >
-              <SourceChip onClick={() => handleSourceClick(source)}>
+              <SourceChip onClick={() => handleGroupClick(group)}>
                 <SourceIcon>{index + 1}</SourceIcon>
-                <SourceName>{source.document_name}</SourceName>
+                <SourceName>{group.document_name}</SourceName>
+                {group.chunks.length > 1 && (
+                  <PassageBadge>{group.chunks.length}</PassageBadge>
+                )}
               </SourceChip>
             </Tooltip>
           ))}
@@ -159,9 +206,11 @@ export const SourcesCitation: FC<SourcesCitationProps> = ({ sources, onOpenDocum
 
       <SourceModal
         isOpen={isModalOpen}
-        source={selectedSource}
+        source={selectedChunk}
+        siblings={selectedGroup?.chunks ?? []}
         fullText={fullChunkText}
         onClose={handleCloseModal}
+        onSelectSibling={handleSelectSibling}
         onOpenDocument={onOpenDocument}
       />
     </SourcesContainer>
