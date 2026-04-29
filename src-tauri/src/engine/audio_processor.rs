@@ -71,6 +71,9 @@ pub fn resample(samples: &[f32], source_rate: u32, target_rate: u32) -> Result<V
 }
 
 /// Apply RNNoise noise suppression. Input must be at 48kHz.
+/// Currently unused — RNNoise was attenuating quiet speech and Whisper
+/// handles noise robustly on its own. Kept for potential future use.
+#[allow(dead_code)]
 pub fn apply_noise_suppression(samples_48k: &[f32]) -> Vec<f32> {
     use nnnoiseless::DenoiseState;
 

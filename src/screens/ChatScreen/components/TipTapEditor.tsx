@@ -24,7 +24,8 @@ import {
   InputLeftElement,
   Spinner,
 } from '@chakra-ui/react';
-import { Bold, Italic, List, Undo, Redo, FolderInput, Search, Sparkles, Mic, Square, NotebookPen } from "lucide-react";
+import { Bold, Italic, List, Undo, Redo, FolderInput, Search, Sparkles, Mic, Square, NotebookPen, Presentation } from "lucide-react";
+import { SlideGeneratorModal } from "./SlideGeneratorModal";
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
 import { marked } from "marked";
@@ -51,6 +52,9 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
   const [projectSearchTerm, setProjectSearchTerm] = useState("");
   const [isCleaningUp, setIsCleaningUp] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
+  // Slide generator modal state
+  const [isSlideModalOpen, setIsSlideModalOpen] = useState(false);
+  const [slidePlainText, setSlidePlainText] = useState("");
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
   const [isPreparingRecording, setIsPreparingRecording] = useState(false);
@@ -571,6 +575,39 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
     }
   };
 
+  const handleOpenSlideGenerator = async () => {
+    try {
+      const [, plainText] = await invoke<[string, string]>("get_app_project_activity_plain_text", {
+        activityId: documentId,
+      });
+
+      if (!plainText.trim()) {
+        toast({
+          title: "Nothing to generate from",
+          description: "This note is empty. Write something first!",
+          status: "warning",
+          duration: 3000,
+          isClosable: true,
+          position: "bottom-right",
+        });
+        return;
+      }
+
+      setSlidePlainText(plainText);
+      setIsSlideModalOpen(true);
+    } catch (error: any) {
+      console.error("Failed to load document for slide generation:", error);
+      toast({
+        title: "Couldn't load document",
+        description: error?.toString() || "An unexpected error occurred.",
+        status: "error",
+        duration: 4000,
+        isClosable: true,
+        position: "bottom-right",
+      });
+    }
+  };
+
   return (
     <Box width="100%" padding="var(--space-l)" maxWidth="900px" mx="auto">
           <Flex
@@ -631,6 +668,18 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
                   size="sm"
                   variant="ghost"
                   onClick={handleSummarizeAsMeeting}
+                  isDisabled={isCleaningUp || isSummarizing || isRecording || isTranscribing}
+                />
+              </Tooltip>
+
+              {/* Generate slide deck button */}
+              <Tooltip label="Generate slide deck">
+                <IconButton
+                  aria-label="Generate slide deck"
+                  icon={<Presentation size={16} />}
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleOpenSlideGenerator}
                   isDisabled={isCleaningUp || isSummarizing || isRecording || isTranscribing}
                 />
               </Tooltip>
@@ -855,6 +904,14 @@ export const TipTapEditor: FC<TipTapEditorProps> = React.memo(({
               )}
             </Box>
           )}
+
+          <SlideGeneratorModal
+            isOpen={isSlideModalOpen}
+            onClose={() => setIsSlideModalOpen(false)}
+            plainText={slidePlainText}
+            provider={getProviderAndModel().provider}
+            modelId={getProviderAndModel().modelId}
+          />
     </Box>
   );
 });

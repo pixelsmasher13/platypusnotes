@@ -20,4 +20,5 @@ export type ChunkSource = {
   document_name: string;
   chunk_index: number;
   chunk_preview: string;
+  score?: number;
 };

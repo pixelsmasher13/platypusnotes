@@ -236,40 +236,49 @@ pub struct ChunkSource {
     pub document_name: String,
     pub chunk_index: i32,
     pub chunk_preview: String,
+    pub score: f32,
 }
 
-/// Get source information for chunk IDs (for citations)
-pub fn get_chunk_sources(conn: &Connection, chunk_ids: &[i64]) -> Result<Vec<ChunkSource>, rusqlite::Error> {
-    if chunk_ids.is_empty() {
+/// Get source information for scored chunk IDs (for citations).
+/// Output is sorted by score descending so the most relevant chunks appear first.
+pub fn get_chunk_sources(conn: &Connection, scored_chunk_ids: &[(i64, f32)]) -> Result<Vec<ChunkSource>, rusqlite::Error> {
+    if scored_chunk_ids.is_empty() {
         return Ok(vec![]);
     }
-    
+
+    let chunk_ids: Vec<i64> = scored_chunk_ids.iter().map(|(id, _)| *id).collect();
+    let score_map: std::collections::HashMap<i64, f32> =
+        scored_chunk_ids.iter().copied().collect();
+
     let placeholders: Vec<String> = chunk_ids.iter().map(|_| "?".to_string()).collect();
     let query = format!(
-        "SELECT dc.id, dc.document_id, pa.document_name, dc.chunk_index, 
+        "SELECT dc.id, dc.document_id, pa.document_name, dc.chunk_index,
                 SUBSTR(dc.chunk_text, 1, 150) as chunk_preview
          FROM document_chunks dc
          JOIN projects_activities pa ON dc.document_id = pa.id
-         WHERE dc.id IN ({})
-         ORDER BY dc.document_id, dc.chunk_index",
+         WHERE dc.id IN ({})",
         placeholders.join(",")
     );
-    
+
     let mut stmt = conn.prepare(&query)?;
-    
-    let sources = stmt.query_map(
+
+    let mut sources: Vec<ChunkSource> = stmt.query_map(
         rusqlite::params_from_iter(chunk_ids.iter()),
         |row| {
+            let chunk_id: i64 = row.get(0)?;
             Ok(ChunkSource {
-                chunk_id: row.get(0)?,
+                chunk_id,
                 document_id: row.get(1)?,
                 document_name: row.get(2)?,
                 chunk_index: row.get(3)?,
                 chunk_preview: row.get::<_, String>(4)?.trim().to_string() + "...",
+                score: score_map.get(&chunk_id).copied().unwrap_or(0.0),
             })
         }
     )?.collect::<Result<Vec<_>, _>>()?;
-    
+
+    sources.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
     Ok(sources)
 }
 

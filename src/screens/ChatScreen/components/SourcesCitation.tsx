@@ -11,7 +11,7 @@ const SourcesContainer = styled.div`
   flex-direction: column;
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  border-top: 1px solid #e2e8f0;
 `;
 
 const SourcesHeader = styled.button`
@@ -20,13 +20,13 @@ const SourcesHeader = styled.button`
   gap: 6px;
   background: none;
   border: none;
-  color: var(--text-secondary, #888);
+  color: #64748b;
   font-size: 12px;
   cursor: pointer;
   padding: 4px 0;
 
   &:hover {
-    color: var(--text-primary, #fff);
+    color: #1e293b;
   }
 `;
 
@@ -41,20 +41,20 @@ const SourceChip = styled.button`
   display: flex;
   align-items: center;
   gap: 6px;
-  background: var(--button-secondary-bg, rgba(255, 255, 255, 0.05));
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
   border-radius: 6px;
   padding: 6px 10px;
-  color: var(--text-secondary, #aaa);
+  color: #475569;
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s ease;
   max-width: 240px;
 
   &:hover {
-    background: var(--button-secondary-hover-bg, rgba(255, 255, 255, 0.1));
-    border-color: var(--accent-color, #6366f1);
-    color: var(--text-primary, #fff);
+    background: #e2e8f0;
+    border-color: #6366f1;
+    color: #1e293b;
   }
 `;
 
@@ -99,8 +99,10 @@ export type DocumentGroup = {
   chunks: ChunkSource[];
 };
 
-// Group sources by document, preserving the order of first appearance.
-// Within each group, chunks are sorted by chunk_index so the user can read them in document order.
+// Group sources by document. Doc groups are ordered by their best (max) chunk score
+// so the most relevant document shows up first. Within each group, chunks stay in
+// chunk_index order so the user reads passages in document order, not score order
+// — adjacent passages usually score within noise of each other.
 function groupByDocument(sources: ChunkSource[]): DocumentGroup[] {
   const map = new Map<number, DocumentGroup>();
   for (const source of sources) {
@@ -118,7 +120,9 @@ function groupByDocument(sources: ChunkSource[]): DocumentGroup[] {
   for (const group of map.values()) {
     group.chunks.sort((a, b) => a.chunk_index - b.chunk_index);
   }
-  return Array.from(map.values());
+  const bestScore = (group: DocumentGroup) =>
+    group.chunks.reduce((max, c) => ((c.score ?? -Infinity) > max ? (c.score ?? -Infinity) : max), -Infinity);
+  return Array.from(map.values()).sort((a, b) => bestScore(b) - bestScore(a));
 }
 
 type SourcesCitationProps = {

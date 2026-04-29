@@ -102,9 +102,9 @@ pub async fn send_prompt_to_local(
                         .db(|conn| get_chunks_by_ids(conn, &chunk_ids_to_fetch))
                         .map_err(|e| format!("Failed to get chunk content: {}", e))?;
 
-                    // Get source information for citations
+                    // Get source information for citations (sorted by relevance score)
                     let sources: Vec<ChunkSource> = app_handle
-                        .db(|conn| get_chunk_sources(conn, &chunk_ids_to_fetch))
+                        .db(|conn| get_chunk_sources(conn, &similar_chunk_ids))
                         .unwrap_or_else(|e| {
                             error!("Failed to get chunk sources: {}", e);
                             vec![]

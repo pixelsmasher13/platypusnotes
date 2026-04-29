@@ -129,9 +129,9 @@ pub async fn send_prompt_to_llm(
                         .db(|conn| get_chunks_by_ids(conn, &chunk_ids_to_fetch))
                         .map_err(|e| format!("Failed to get chunk content: {}", e))?;
                     
-                    // Get source information for citations
+                    // Get source information for citations (sorted by relevance score)
                     let sources: Vec<ChunkSource> = app_handle
-                        .db(|conn| get_chunk_sources(conn, &chunk_ids_to_fetch))
+                        .db(|conn| get_chunk_sources(conn, &similar_chunk_ids))
                         .unwrap_or_else(|e| {
                             error!("Failed to get chunk sources: {}", e);
                             vec![]
@@ -176,35 +176,33 @@ pub async fn send_prompt_to_llm(
         // RAG retrieval complete - filtered_context already set from chunk search above
     }
 
-    // Build system prompt - include RAG context only on first message
+    // Build system prompt. Both RAG chunks and selected-document text live here so
+    // the prompt cache (set on the system block below) can absorb them — sending the
+    // doc with each user message instead would miss the cache and re-bill the doc
+    // on every turn.
+    const BASE_SYSTEM: &str = "You are Platypus, a friendly and helpful AI note-taking assistant powered by Anthropic. Keep your tone warm and helpful. Provide answers in markdown format.";
     let system_prompt = if !filtered_context.is_empty() {
         format!(
-            "You are Platypus, a friendly and helpful AI note-taking assistant powered by Anthropic. Keep your tone warm and helpful. Provide answers in markdown format.\n\n\
-            The following document chunks were retrieved from the user's project and may help answer their question. Use them if relevant, otherwise ignore them:\n\n{}",
-            filtered_context
+            "{}\n\nThe following document chunks were retrieved from the user's project and may help answer their question. Use them if relevant, otherwise ignore them:\n\n{}",
+            BASE_SYSTEM, filtered_context
+        )
+    } else if !combined_activity_text.is_empty() {
+        format!(
+            "{}\n\nContext from selected documents:\n{}",
+            BASE_SYSTEM, combined_activity_text
         )
     } else {
-        "You are Platypus, a friendly and helpful AI note-taking assistant powered by Anthropic. Keep your tone warm and helpful. Provide answers in markdown format.".to_string()
+        BASE_SYSTEM.to_string()
     };
 
     // Build messages array using Claude's native multi-turn format
-    let mut messages: Vec<Message> = conversation_history
+    let messages: Vec<Message> = conversation_history
         .iter()
         .map(|msg| Message {
             role: msg.role.clone(),
             content: msg.content.clone(),
         })
         .collect();
-
-    // Add combined_activity_text to first user message if no RAG context
-    if !combined_activity_text.is_empty() && filtered_context.is_empty() {
-        if let Some(first_user_msg) = messages.iter_mut().find(|m| m.role == "user") {
-            first_user_msg.content = format!(
-                "{}\n\nContext from selected documents:\n{}",
-                first_user_msg.content, combined_activity_text
-            );
-        }
-    }
 
     // Wrap the system prompt with prompt caching enabled.
     // Anthropic silently ignores cache_control if the block is below the

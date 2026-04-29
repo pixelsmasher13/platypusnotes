@@ -26,7 +26,7 @@ use crate::engine::chat_engine_openai::{generate_conversation_name, send_prompt_
 use crate::engine::chat_engine_gemini::{name_conversation_gemini, send_prompt_to_gemini};
 use crate::engine::chat_engine_local::{name_conversation_local, send_prompt_to_local};
 use crate::engine::clean_up_engine::clean_up;
-use crate::engine::document_cleanup_engine::{clean_up_document_with_llm, summarize_as_meeting_notes};
+use crate::engine::document_cleanup_engine::{clean_up_document_with_llm, summarize_as_meeting_notes, generate_slides_from_document};
 use crate::engine::similarity_search_engine::SyncSimilaritySearch;
 use crate::entity::chat_item::{Chat, StoredMessage};
 use crate::entity::permission::Permission;
@@ -175,6 +175,7 @@ async fn main() {
             extract_document_text,
             clean_up_document_with_llm,
             summarize_as_meeting_notes,
+            generate_slides_from_document,
             check_whisper_model,
             download_whisper_model,
             init_whisper_model,
@@ -901,14 +902,14 @@ fn get_transcript() -> String {
     t.clone()
 }
 
-/// Process a chunk of raw audio: resample → denoise → transcribe with Whisper
+/// Process a chunk of raw audio: resample → transcribe with Whisper
 /// Returns None if chunk is too quiet (RMS gate)
 fn process_and_transcribe_chunk(raw_samples: &[f32]) -> Option<String> {
-    use crate::engine::audio_processor::{resample, apply_noise_suppression};
+    use crate::engine::audio_processor::resample;
 
     // RMS energy gate on raw audio BEFORE any processing
     let rms: f32 = (raw_samples.iter().map(|s| s * s).sum::<f32>() / raw_samples.len() as f32).sqrt();
-    if rms < 0.008 {
+    if rms < 0.005 {
         return None;
     }
 
@@ -918,20 +919,9 @@ fn process_and_transcribe_chunk(raw_samples: &[f32]) -> Option<String> {
         return None;
     }
 
-    // Resample to 48kHz for noise suppression
-    let samples_48k = match resample(raw_samples, device_rate, 48000) {
-        Ok(s) => s,
-        Err(e) => {
-            log::warn!("Resample to 48kHz failed: {}", e);
-            return None;
-        }
-    };
-
-    // Apply noise suppression at 48kHz
-    let denoised = apply_noise_suppression(&samples_48k);
-
-    // Resample to 16kHz for Whisper
-    let samples_16k = match resample(&denoised, 48000, 16000) {
+    // Resample directly to 16kHz for Whisper. Whisper-large-v3-turbo is robust
+    // to noise on its own, and RNNoise was crushing speech amplitude.
+    let samples_16k = match resample(raw_samples, device_rate, 16000) {
         Ok(s) => s,
         Err(e) => {
             log::warn!("Resample to 16kHz failed: {}", e);

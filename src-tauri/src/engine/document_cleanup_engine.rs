@@ -38,6 +38,26 @@ Rules:
 - Keep it concise but comprehensive
 - Return ONLY the markdown. No explanations, no preamble, no code fences."##;
 
+const SLIDES_SYSTEM_PROMPT: &str = r##"You are an expert at turning documents into clear, well-structured slide decks.
+
+Generate a slide deck as a JSON array. Each slide must have:
+- "title": short headline (≤ 60 characters, no markdown)
+- "bullets": array of 2-6 short bullet strings (each ≤ 100 characters, no markdown formatting)
+- "speaker_notes": optional 1-2 sentence presenter notes (string, can be omitted)
+
+Rules:
+- The first slide is a title slide: title = the deck's overall title, bullets[0] = a one-line subtitle.
+- The last slide is a closing slide titled "Next steps" or "Q&A", with concrete follow-ups if the source material implies any.
+- Use only information present in the source. Do not invent facts.
+- Output ONLY valid JSON — no preamble, no commentary, no markdown code fences.
+
+Example:
+[
+  {"title": "Q2 Planning", "bullets": ["Strategic priorities for Q2 2026"], "speaker_notes": "Welcome and context for the quarter."},
+  {"title": "Goals", "bullets": ["Increase MAU by 20%", "Reduce churn to under 5%", "Ship two major features"]},
+  {"title": "Next steps", "bullets": ["Finalize roadmap by Friday", "Schedule cross-team review"]}
+]"##;
+
 // Claude types
 #[derive(Serialize)]
 struct ClaudeRequest {
@@ -149,6 +169,58 @@ pub async fn summarize_as_meeting_notes(
 ) -> Result<String, String> {
     info!("Summarizing as meeting notes with provider: {}, model: {:?}", provider, model_id);
     send_to_llm(&app_handle, &plain_text, &provider, model_id, MEETING_SUMMARY_SYSTEM_PROMPT).await
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Slide {
+    pub title: String,
+    pub bullets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker_notes: Option<String>,
+}
+
+#[tauri::command]
+pub async fn generate_slides_from_document(
+    app_handle: tauri::AppHandle,
+    plain_text: String,
+    provider: String,
+    model_id: Option<String>,
+    focus: Option<String>,
+    slide_count: Option<u32>,
+) -> Result<Vec<Slide>, String> {
+    info!(
+        "Generating slides — provider: {}, model: {:?}, count: {:?}, focus: {:?}",
+        provider, model_id, slide_count, focus
+    );
+
+    let target_count = slide_count.unwrap_or(10).clamp(3, 30);
+
+    let mut user_prompt = format!(
+        "Document content:\n\n{}\n\n---\nGenerate approximately {} slides.",
+        plain_text.trim(),
+        target_count
+    );
+    if let Some(f) = focus.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        user_prompt.push_str(&format!("\nFocus or style: {}", f));
+    }
+
+    let raw = send_to_llm(&app_handle, &user_prompt, &provider, model_id, SLIDES_SYSTEM_PROMPT).await?;
+    parse_slides(&raw)
+}
+
+/// Best-effort JSON extraction: strips optional markdown fences and slices to the
+/// first '[' and last ']' to forgive a stray preamble or trailing comment.
+fn parse_slides(raw: &str) -> Result<Vec<Slide>, String> {
+    let trimmed = raw.trim();
+    let start = trimmed.find('[').ok_or_else(|| "LLM response did not contain a JSON array".to_string())?;
+    let end = trimmed.rfind(']').ok_or_else(|| "LLM response did not contain a closing JSON array bracket".to_string())?;
+    if end <= start {
+        return Err("Malformed JSON in LLM response".to_string());
+    }
+    let json_slice = &trimmed[start..=end];
+
+    serde_json::from_str::<Vec<Slide>>(json_slice)
+        .map_err(|e| format!("Failed to parse slide JSON: {}. Raw response began with: {}", e, &trimmed.chars().take(120).collect::<String>()))
 }
 
 async fn send_to_llm(

@@ -570,23 +570,20 @@ export const ChatScreen: FC = () => {
 
       const provider = getProvider();
       
-      // Build combined context including:
-      // 1. Project activity text (if a project is selected)
-      // 2. Selected activity texts from the modal
-      // 3. Document context from unassigned document selection
-      // IMPORTANT: Only attach document content on the FIRST message of conversation
-      // to avoid duplicating content that's already in the conversation history
-      let combinedActivityText = "";
-      if (isFirstMessage) {
-        const contextParts = [];
-        const projectText = await getSelectedProjectActivityText();
-        if (projectText) contextParts.push(projectText);
-        if (selectedActivityTexts.length > 0) contextParts.push(selectedActivityTexts.join("\n\n"));
-        if (selectedDocumentContext) {
-          contextParts.push(`\n\n--- Document: ${selectedDocumentContext.name} ---\n${selectedDocumentContext.text}`);
-        }
-        combinedActivityText = contextParts.join("\n");
+      // Build combined context every turn so persistent selections (selected document,
+      // selected project) reach the model on follow-ups, not just the first turn.
+      // The Claude backend places this in the cached system prompt; other engines
+      // attach it to the first user message — both rebuild from this each turn.
+      // selectedActivityTexts remain one-shot (cleared after send), so they only
+      // appear on the turn the user attached them via the modal.
+      const contextParts: string[] = [];
+      const projectText = await getSelectedProjectActivityText();
+      if (projectText) contextParts.push(projectText);
+      if (selectedActivityTexts.length > 0) contextParts.push(selectedActivityTexts.join("\n\n"));
+      if (selectedDocumentContext) {
+        contextParts.push(`\n\n--- Document: ${selectedDocumentContext.name} ---\n${selectedDocumentContext.text}`);
       }
+      const combinedActivityText = contextParts.join("\n");
       
       // Get selected project ID for chunk-based retrieval
       const selectedProject = getSelectedProject();
