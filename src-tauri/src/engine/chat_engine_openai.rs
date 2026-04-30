@@ -228,10 +228,12 @@ pub async fn generate_conversation_name(
         user_input
     );
 
-    // Create a chat completion request with the system message and user input
+    // Create a chat completion request with the system message and user input.
+    // Note: GPT-5.x models reject `max_tokens` and require `max_completion_tokens`,
+    // which the async-openai 0.23 builder doesn't expose. Skipping the cap is fine —
+    // the system prompt already constrains output to ≤18 characters.
     let request = CreateChatCompletionRequestArgs::default()
-        .model(DEFAULT_MODEL) // Specify the model, you can use "gpt-4" if needed
-        .max_tokens(20u32) // Limit the response to 20 tokens
+        .model(DEFAULT_MODEL)
         .messages(vec![
             // Use the correct message type for the system message
             ChatCompletionRequestSystemMessageArgs::default()

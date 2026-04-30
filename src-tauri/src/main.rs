@@ -913,16 +913,12 @@ fn get_transcript() -> String {
     t.clone()
 }
 
-/// Process a chunk of raw audio: resample → transcribe with Whisper
-/// Returns None if chunk is too quiet (RMS gate)
+/// Process a chunk of raw audio: resample → transcribe with Whisper.
+/// No RMS gate — Whisper itself handles silence (returns empty), so we let
+/// every chunk through to avoid dropping quiet speech (soft speakers, laptop
+/// speaker playback, distant voices).
 fn process_and_transcribe_chunk(raw_samples: &[f32]) -> Option<String> {
     use crate::engine::audio_processor::resample;
-
-    // RMS energy gate on raw audio BEFORE any processing
-    let rms: f32 = (raw_samples.iter().map(|s| s * s).sum::<f32>() / raw_samples.len() as f32).sqrt();
-    if rms < 0.005 {
-        return None;
-    }
 
     let device_rate = crate::engine::audio_engine::DEVICE_SAMPLE_RATE
         .load(std::sync::atomic::Ordering::SeqCst);
