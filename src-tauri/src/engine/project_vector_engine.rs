@@ -91,16 +91,59 @@ pub async fn search_project_vectors(
 ) -> Result<Vec<(i64, f32)>> {
     let db_arc = get_project_vector_db(app_handle, project_id).await?;
     let db = db_arc.lock().await;
-    
+
     let results = db.top_k(query, top_k, api_key).await?;
-    
+
     // Convert usize IDs to i64
     let results: Vec<(i64, f32)> = results
         .into_iter()
         .map(|(id, distance)| (id as i64, distance))
         .collect();
-    
+
     info!("Found {} similar chunks in project {}", results.len(), project_id);
+    Ok(results)
+}
+
+/// Search for similar chunks, but only return IDs that still exist in SQLite.
+/// HNSW is append-only, so deleted chunks linger as zombie vectors. Filtering by
+/// the live chunk-ID set in `document_chunks` (where `is_vectorized = 1`) keeps
+/// search results aligned with what the app actually has on disk.
+pub async fn search_project_vectors_live(
+    app_handle: &AppHandle,
+    project_id: i64,
+    query: &str,
+    top_k: usize,
+    api_key: &str,
+) -> Result<Vec<(i64, f32)>> {
+    use crate::configuration::state::ServiceAccess;
+    use crate::repository::chunk_repository::get_chunk_ids_for_project;
+
+    // Pre-fetch the set of chunk IDs that actually exist for this project.
+    let live_ids = app_handle
+        .db(|conn| get_chunk_ids_for_project(conn, project_id))
+        .map_err(|e| anyhow::anyhow!("Failed to load live chunk IDs: {}", e))?;
+
+    if live_ids.is_empty() {
+        info!("Project {} has no vectorized chunks", project_id);
+        return Ok(vec![]);
+    }
+
+    let db_arc = get_project_vector_db(app_handle, project_id).await?;
+    let db = db_arc.lock().await;
+
+    let results = db.top_k_filtered(query, top_k, api_key, &live_ids).await?;
+
+    let results: Vec<(i64, f32)> = results
+        .into_iter()
+        .map(|(id, distance)| (id as i64, distance))
+        .collect();
+
+    info!(
+        "Found {} live similar chunks in project {} ({} live IDs in scope)",
+        results.len(),
+        project_id,
+        live_ids.len()
+    );
     Ok(results)
 }
 

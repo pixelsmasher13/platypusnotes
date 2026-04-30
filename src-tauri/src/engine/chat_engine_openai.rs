@@ -1,6 +1,6 @@
 use crate::configuration::state::ServiceAccess;
 use crate::engine::similarity_search_engine::DEFAULT_RAG_TOP_K;
-use crate::engine::project_vector_engine::search_project_vectors;
+use crate::engine::project_vector_engine::search_project_vectors_live;
 use crate::repository::settings_repository::get_setting;
 use crate::repository::chunk_repository::{get_chunks_by_ids, get_chunk_sources, ChunkSource};
 use async_openai::{
@@ -57,7 +57,7 @@ pub async fn send_prompt_to_openai(
         if let Some(pid) = project_id {
             debug!("Using per-project vector search for project {}", pid);
 
-            match search_project_vectors(&app_handle, pid, &user_prompt, rag_top_k, &setting.setting_value).await {
+            match search_project_vectors_live(&app_handle, pid, &user_prompt, rag_top_k, &setting.setting_value).await {
                 Ok(similar_chunk_ids) if !similar_chunk_ids.is_empty() => {
                     let chunk_ids_to_fetch: Vec<i64> = similar_chunk_ids
                         .iter()
@@ -70,7 +70,8 @@ pub async fn send_prompt_to_openai(
                         .db(|conn| get_chunks_by_ids(conn, &chunk_ids_to_fetch))
                         .map_err(|e| format!("Failed to get chunk content: {}", e))?;
 
-                    // Get source information for citations (sorted by relevance score)
+                    // search_project_vectors_live already filtered HNSW results against
+                    // the live chunk-ID set, so similar_chunk_ids and chunks should match.
                     let sources: Vec<ChunkSource> = app_handle
                         .db(|conn| get_chunk_sources(conn, &similar_chunk_ids))
                         .unwrap_or_else(|e| {
@@ -78,7 +79,6 @@ pub async fn send_prompt_to_openai(
                             vec![]
                         });
 
-                    // Emit sources to frontend
                     if !sources.is_empty() {
                         if let Err(e) = app_handle
                             .get_window("main")

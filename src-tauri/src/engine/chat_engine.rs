@@ -8,7 +8,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::configuration::state::ServiceAccess;
 use crate::engine::similarity_search_engine::DEFAULT_RAG_TOP_K;
-use crate::engine::project_vector_engine::search_project_vectors;
+use crate::engine::project_vector_engine::search_project_vectors_live;
 use crate::repository::settings_repository::get_setting;
 use crate::repository::chunk_repository::{get_chunks_by_ids, get_chunk_sources, ChunkSource};
 
@@ -115,7 +115,7 @@ pub async fn send_prompt_to_llm(
             debug!("Using per-project vector search for project {}", pid);
             
             // Search directly in project's vector index
-            match search_project_vectors(&app_handle, pid, &user_prompt, rag_top_k, &setting_openai.setting_value).await {
+            match search_project_vectors_live(&app_handle, pid, &user_prompt, rag_top_k, &setting_openai.setting_value).await {
                 Ok(similar_chunk_ids) if !similar_chunk_ids.is_empty() => {
                     let chunk_ids_to_fetch: Vec<i64> = similar_chunk_ids
                         .iter()
